@@ -271,6 +271,8 @@ func setupROFolder() *Model {
 	fcfg := config.NewFolderConfiguration(protocol.LocalDeviceID, "ro", "receive only test", fs.FilesystemTypeBasic, "_recvonly")
 	fcfg.Type = config.FolderTypeReceiveOnly
 	fcfg.Devices = []config.FolderDeviceConfiguration{{DeviceID: device1}}
+	fcfg.FSWatcherEnabled = false
+	fcfg.RescanIntervalS = 86400
 
 	cfg := defaultCfg.Copy()
 	cfg.Folders = append(cfg.Folders, fcfg)
