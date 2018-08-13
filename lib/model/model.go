@@ -134,7 +134,7 @@ func NewModel(cfg *config.Wrapper, id protocol.DeviceID, clientName, clientVersi
 	m := &Model{
 		Supervisor: suture.New("model", suture.Spec{
 			Log: func(line string) {
-				l.Debugln(line)
+				l.Warnln(line)
 			},
 		}),
 		cfg:                 cfg,

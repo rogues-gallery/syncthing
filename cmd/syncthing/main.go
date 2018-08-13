@@ -592,7 +592,7 @@ func syncthingMain(runtimeOptions RuntimeOptions) {
 	// We want any logging it does to go through our log system.
 	mainService := suture.New("main", suture.Spec{
 		Log: func(line string) {
-			l.Debugln(line)
+			l.Warnln(line)
 		},
 	})
 	mainService.ServeBackground()

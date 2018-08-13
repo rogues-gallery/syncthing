@@ -103,7 +103,7 @@ func NewService(cfg *config.Wrapper, myID protocol.DeviceID, mdl Model, tlsCfg *
 	service := &Service{
 		Supervisor: suture.New("connections.Service", suture.Spec{
 			Log: func(line string) {
-				l.Infoln(line)
+				l.Warnln(line)
 			},
 		}),
 		cfg:                  cfg,
@@ -127,7 +127,7 @@ func NewService(cfg *config.Wrapper, myID protocol.DeviceID, mdl Model, tlsCfg *
 		// not subject to these limitations.
 		listenerSupervisor: suture.New("c.S.listenerSupervisor", suture.Spec{
 			Log: func(line string) {
-				l.Infoln(line)
+				l.Warnln(line)
 			},
 			FailureThreshold: 2,
 			FailureBackoff:   600 * time.Second,

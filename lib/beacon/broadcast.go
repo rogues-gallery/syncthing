@@ -34,7 +34,7 @@ func NewBroadcast(port int) *Broadcast {
 			FailureBackoff:   60 * time.Second,
 			// Only log restarts in debug mode.
 			Log: func(line string) {
-				l.Debugln(line)
+				l.Warnln(line)
 			},
 		}),
 		port:   port,

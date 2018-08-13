@@ -34,7 +34,7 @@ func NewMulticast(addr string) *Multicast {
 			FailureBackoff:   60 * time.Second,
 			// Only log restarts in debug mode.
 			Log: func(line string) {
-				l.Debugln(line)
+				l.Warnln(line)
 			},
 		}),
 		inbox:  make(chan []byte),
