@@ -166,11 +166,16 @@ func TestWatchWinRoot(t *testing.T) {
 	// testFs is Filesystem, but we need BasicFilesystem here
 	root := `D:\`
 	fs := newBasicFilesystem(root)
-	watch, root, err := fs.watchPaths(".")
+	watch, roots, err := fs.watchPaths(".")
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	done := make(chan struct{})
+	defer func() {
+		cancel()
+		<-done
+	}()
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -178,7 +183,8 @@ func TestWatchWinRoot(t *testing.T) {
 			}
 			cancel()
 		}()
-		fs.watchLoop(".", root, backendChan, outChan, errChan, fakeMatcher{}, ctx)
+		fs.watchLoop(ctx, ".", roots, backendChan, outChan, errChan, fakeMatcher{})
+		close(done)
 	}()
 
 	// filepath.Dir as watch has a /... suffix
@@ -201,6 +207,14 @@ func TestWatchWinRoot(t *testing.T) {
 
 // TestWatchOutside checks that no changes from outside the folder make it in
 func TestWatchOutside(t *testing.T) {
+	expectErrorForPath(t, filepath.Join(filepath.Dir(testDirAbs), "outside"))
+
+	rootWithoutSlash := strings.TrimRight(filepath.ToSlash(testDirAbs), "/")
+	expectErrorForPath(t, rootWithoutSlash+"outside")
+	expectErrorForPath(t, rootWithoutSlash+"outside/thing")
+}
+
+func expectErrorForPath(t *testing.T, path string) {
 	outChan := make(chan Event)
 	backendChan := make(chan notify.EventInfo, backendBuffer)
 	errChan := make(chan error)
@@ -210,14 +224,23 @@ func TestWatchOutside(t *testing.T) {
 	// testFs is Filesystem, but we need BasicFilesystem here
 	fs := newBasicFilesystem(testDirAbs)
 
-	go fs.watchLoop(".", testDirAbs, backendChan, outChan, errChan, fakeMatcher{}, ctx)
+	done := make(chan struct{})
+	go func() {
+		fs.watchLoop(ctx, ".", []string{testDirAbs}, backendChan, outChan, errChan, fakeMatcher{})
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
 
-	backendChan <- fakeEventInfo(filepath.Join(filepath.Dir(testDirAbs), "outside"))
+	backendChan <- fakeEventInfo(path)
 
 	select {
 	case <-time.After(10 * time.Second):
-		cancel()
 		t.Errorf("Timed out before receiving error")
+	case e := <-outChan:
+		t.Errorf("Unexpected passed through event %v", e)
 	case <-errChan:
 	case <-ctx.Done():
 	}
@@ -234,7 +257,15 @@ func TestWatchSubpath(t *testing.T) {
 	fs := newBasicFilesystem(testDirAbs)
 
 	abs, _ := fs.rooted("sub")
-	go fs.watchLoop("sub", testDirAbs, backendChan, outChan, errChan, fakeMatcher{}, ctx)
+	done := make(chan struct{})
+	go func() {
+		fs.watchLoop(ctx, "sub", []string{testDirAbs}, backendChan, outChan, errChan, fakeMatcher{})
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
 
 	backendChan <- fakeEventInfo(filepath.Join(abs, "file"))
 
@@ -347,7 +378,7 @@ func TestWatchSymlinkedRoot(t *testing.T) {
 
 func TestUnrootedChecked(t *testing.T) {
 	fs := newBasicFilesystem(testDirAbs)
-	if unrooted, err := fs.unrootedChecked("/random/other/path", testDirAbs); err == nil {
+	if unrooted, err := fs.unrootedChecked("/random/other/path", []string{testDirAbs}); err == nil {
 		t.Error("unrootedChecked did not return an error on outside path, but returned", unrooted)
 	}
 }

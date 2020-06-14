@@ -7,6 +7,7 @@
 package connections
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/url"
@@ -42,7 +43,7 @@ type tcpListener struct {
 	mut sync.RWMutex
 }
 
-func (t *tcpListener) serve(stop chan struct{}) error {
+func (t *tcpListener) serve(ctx context.Context) error {
 	tcaddr, err := net.ResolveTCPAddr(t.uri.Scheme, t.uri.Host)
 	if err != nil {
 		l.Infoln("Listen (BEP/tcp):", err)
@@ -54,7 +55,9 @@ func (t *tcpListener) serve(stop chan struct{}) error {
 		l.Infoln("Listen (BEP/tcp):", err)
 		return err
 	}
+	t.notifyAddressesChanged(t)
 	defer listener.Close()
+	defer t.clearAddresses(t)
 
 	l.Infof("TCP listener (%v) starting", listener.Addr())
 	defer l.Infof("TCP listener (%v) shutting down", listener.Addr())
@@ -76,7 +79,7 @@ func (t *tcpListener) serve(stop chan struct{}) error {
 		listener.SetDeadline(time.Now().Add(time.Second))
 		conn, err := listener.Accept()
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			if err == nil {
 				conn.Close()
 			}
@@ -183,7 +186,7 @@ func (f *tcpListenerFactory) New(uri *url.URL, cfg config.Wrapper, tlsCfg *tls.C
 		natService: natService,
 		factory:    f,
 	}
-	l.ServiceWithError = util.AsServiceWithError(l.serve)
+	l.ServiceWithError = util.AsServiceWithError(l.serve, l.String())
 	return l
 }
 

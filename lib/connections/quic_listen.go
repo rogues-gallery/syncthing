@@ -9,6 +9,7 @@
 package connections
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/url"
@@ -77,7 +78,7 @@ func (t *quicListener) OnExternalAddressChanged(address *stun.Host, via string) 
 	}
 }
 
-func (t *quicListener) serve(stop chan struct{}) error {
+func (t *quicListener) serve(ctx context.Context) error {
 	network := strings.Replace(t.uri.Scheme, "quic", "udp", -1)
 
 	packetConn, err := net.ListenPacket(network, t.uri.Host)
@@ -101,58 +102,52 @@ func (t *quicListener) serve(stop chan struct{}) error {
 		l.Infoln("Listen (BEP/quic):", err)
 		return err
 	}
+	t.notifyAddressesChanged(t)
+	defer listener.Close()
+	defer t.clearAddresses(t)
 
 	l.Infof("QUIC listener (%v) starting", packetConn.LocalAddr())
 	defer l.Infof("QUIC listener (%v) shutting down", packetConn.LocalAddr())
 
-	// Accept is forever, so handle stops externally.
-	go func() {
-		select {
-		case <-stop:
-			_ = listener.Close()
-		}
-	}()
+	acceptFailures := 0
+	const maxAcceptFailures = 10
 
 	for {
-		// Blocks forever, see https://github.com/lucas-clemente/quic-go/issues/1915
-		session, err := listener.Accept()
-
 		select {
-		case <-stop:
-			if err == nil {
-				_ = session.Close()
-			}
+		case <-ctx.Done():
 			return nil
 		default:
 		}
-		if err != nil {
-			if err, ok := err.(net.Error); !ok || !err.Timeout() {
-				l.Warnln("Listen (BEP/quic): Accepting connection:", err)
+
+		session, err := listener.Accept(ctx)
+		if err == context.Canceled {
+			return nil
+		} else if err != nil {
+			l.Infoln("Listen (BEP/quic): Accepting connection:", err)
+
+			acceptFailures++
+			if acceptFailures > maxAcceptFailures {
+				// Return to restart the listener, because something
+				// seems permanently damaged.
+				return err
 			}
+
+			// Slightly increased delay for each failure.
+			time.Sleep(time.Duration(acceptFailures) * time.Second)
+
 			continue
 		}
 
+		acceptFailures = 0
+
 		l.Debugln("connect from", session.RemoteAddr())
 
-		// Accept blocks forever, give it 10s to do it's thing.
-		ok := make(chan struct{})
-		go func() {
-			select {
-			case <-ok:
-				return
-			case <-stop:
-				_ = session.Close()
-			case <-time.After(10 * time.Second):
-				l.Debugln("timed out waiting for AcceptStream on", session.RemoteAddr())
-				_ = session.Close()
-			}
-		}()
-
-		stream, err := session.AcceptStream()
-		close(ok)
+		streamCtx, cancel := context.WithTimeout(ctx, quicOperationTimeout)
+		stream, err := session.AcceptStream(streamCtx)
+		cancel()
 		if err != nil {
-			l.Debugln("failed to accept stream from", session.RemoteAddr(), err.Error())
-			_ = session.Close()
+			l.Debugf("failed to accept stream from %s: %v", session.RemoteAddr(), err)
+			_ = session.CloseWithError(1, err.Error())
 			continue
 		}
 
@@ -208,7 +203,7 @@ func (f *quicListenerFactory) New(uri *url.URL, cfg config.Wrapper, tlsCfg *tls.
 		conns:   conns,
 		factory: f,
 	}
-	l.ServiceWithError = util.AsServiceWithError(l.serve)
+	l.ServiceWithError = util.AsServiceWithError(l.serve, l.String())
 	l.nat.Store(stun.NATUnknown)
 	return l
 }
